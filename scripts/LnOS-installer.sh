@@ -19,9 +19,14 @@
 
 #
 # @file LnOS-installer.sh
-# @brief Installs Arch linux and 
+# @brief Installs Arch linux on x86_64, aarch64 (Pi), and Apple Silicon (UTM) 
 # @author Betim-Hodza, Ric3y
 # @date 2025
+#
+# Supports:
+# - x86_64: Via archiso build (build-iso.sh)
+# - aarch64 (Pi): Via ARM image build (build-arm-image.sh)  
+# - Apple Silicon: Via UTM virtual machine (build-utm-asahi.sh)
 #
 
 set -e
