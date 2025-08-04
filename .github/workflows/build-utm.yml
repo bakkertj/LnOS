@@ -1,4 +1,4 @@
-name: Build LnOS UTM VM
+name: Build LnOS UTM VM 
 
 on:
   push:
