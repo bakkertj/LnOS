@@ -113,14 +113,14 @@ jobs:
         echo "Scripts directory:"
         ls -la out/lnos-asahi-$(date +%Y.%m.%d).utm/Data/lnos-scripts/
         
-         - name: Upload build artifacts
-       uses: actions/upload-artifact@v4
-       with:
-         name: lnos-utm-vm
-         path: |
-           out/lnos-asahi-$(date +%Y.%m.%d).utm/
-           out/lnos-asahi-$(date +%Y.%m.%d)-ci.zip
-         retention-days: 30
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: lnos-utm-vm
+        path: |
+          out/lnos-asahi-$(date +%Y.%m.%d).utm/
+          out/lnos-asahi-$(date +%Y.%m.%d)-ci.zip
+                 retention-days: 30
          
      - name: Create release assets
        if: github.event_name == 'workflow_dispatch'

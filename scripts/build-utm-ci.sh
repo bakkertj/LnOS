@@ -32,8 +32,10 @@ print_error() {
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUTPUT_DIR="$(pwd)/out"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+OUTPUT_DIR="$PROJECT_DIR/out"
 UTM_NAME="lnos-asahi-$(date +%Y.%m.%d)"
+UTM_DIR="$OUTPUT_DIR/${UTM_NAME}.utm"
 DISK_SIZE_GB="20"
 MEMORY_SIZE_MB="4096"
 CPU_CORES="4"
@@ -198,8 +200,8 @@ print_status "Creating CI artifacts..."
 mkdir -p "$UTM_DIR/Data/lnos-scripts"
 
 # Copy the LnOS installer and related files
-if [[ -f "$SCRIPT_DIR/scripts/LnOS-installer.sh" ]]; then
-    cp "$SCRIPT_DIR/scripts/LnOS-installer.sh" "$UTM_DIR/Data/lnos-scripts/"
+if [[ -f "$PROJECT_DIR/scripts/LnOS-installer.sh" ]]; then
+    cp "$PROJECT_DIR/scripts/LnOS-installer.sh" "$UTM_DIR/Data/lnos-scripts/"
 else
     print_warning "LnOS-installer.sh not found, downloading from GitHub..."
     curl -o "$UTM_DIR/Data/lnos-scripts/LnOS-installer.sh" \
@@ -208,8 +210,8 @@ else
 fi
 
 # Copy package lists
-if [[ -d "$SCRIPT_DIR/scripts/pacman_packages" ]]; then
-    cp -r "$SCRIPT_DIR/scripts/pacman_packages" "$UTM_DIR/Data/lnos-scripts/" 
+if [[ -d "$PROJECT_DIR/scripts/pacman_packages" ]]; then
+    cp -r "$PROJECT_DIR/scripts/pacman_packages" "$UTM_DIR/Data/lnos-scripts/" 
 else
     print_warning "Package lists not found, creating basic CSE package list..."
     mkdir -p "$UTM_DIR/Data/lnos-scripts/pacman_packages"
