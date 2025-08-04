@@ -41,8 +41,70 @@ fi
 
 # Check if UTM is installed
 if ! command -v utmctl &> /dev/null && [[ ! -d "/Applications/UTM.app" ]]; then
-    print_error "UTM is not installed. Please install UTM from https://mac.getutm.app/ or Mac App Store"
-    exit 1
+    print_warning "UTM is not installed. Attempting to install UTM automatically..."
+    
+    # Check if Homebrew is available
+    if command -v brew &> /dev/null; then
+        print_status "Installing UTM via Homebrew..."
+        brew install --cask utm
+        if [[ $? -eq 0 ]]; then
+            print_status "UTM installed successfully via Homebrew!"
+        else
+            print_error "Failed to install UTM via Homebrew"
+            print_error "Please install UTM manually from https://mac.getutm.app/ or Mac App Store"
+            exit 1
+        fi
+    else
+        # Try to install via curl (direct download)
+        print_status "Homebrew not found. Attempting to download UTM directly..."
+        UTM_DOWNLOAD_URL="https://github.com/utmapp/UTM/releases/latest/download/UTM.dmg"
+        UTM_DMG="$OUTPUT_DIR/UTM.dmg"
+        
+        print_status "Downloading UTM from GitHub releases..."
+        if curl -L -o "$UTM_DMG" "$UTM_DOWNLOAD_URL"; then
+            print_status "UTM downloaded successfully. Installing..."
+            
+            # Mount the DMG
+            if hdiutil attach "$UTM_DMG" -quiet; then
+                # Find the mounted volume
+                MOUNT_POINT=$(hdiutil info | grep "/Volumes/UTM" | awk '{print $3}' | head -1)
+                if [[ -n "$MOUNT_POINT" && -d "$MOUNT_POINT" ]]; then
+                    # Copy UTM to Applications
+                    if cp -R "$MOUNT_POINT/UTM.app" "/Applications/"; then
+                        print_status "UTM installed successfully!"
+                        # Unmount the DMG
+                        hdiutil detach "$MOUNT_POINT" -quiet
+                        # Clean up
+                        rm "$UTM_DMG"
+                    else
+                        print_error "Failed to copy UTM to Applications"
+                        hdiutil detach "$MOUNT_POINT" -quiet
+                        rm "$UTM_DMG"
+                        exit 1
+                    fi
+                else
+                    print_error "Failed to mount UTM DMG"
+                    rm "$UTM_DMG"
+                    exit 1
+                fi
+            else
+                print_error "Failed to mount UTM DMG"
+                rm "$UTM_DMG"
+                exit 1
+            fi
+        else
+            print_error "Failed to download UTM"
+            print_error "Please install UTM manually from https://mac.getutm.app/ or Mac App Store"
+            exit 1
+        fi
+    fi
+    
+    # Verify installation
+    if ! command -v utmctl &> /dev/null && [[ ! -d "/Applications/UTM.app" ]]; then
+        print_error "UTM installation verification failed"
+        print_error "Please install UTM manually from https://mac.getutm.app/ or Mac App Store"
+        exit 1
+    fi
 fi
 
 print_status "Building LnOS UTM Virtual Machine with Asahi Linux..."
@@ -80,22 +142,78 @@ elif [[ -f "$OUTPUT_DIR/asahi-installer.iso" ]]; then
     cp "$OUTPUT_DIR/asahi-installer.iso" "$ASAHI_ISO"
 else
     print_warning "Asahi Linux installer ISO not found locally."
-    print_warning "Please download the latest Asahi Linux installer ISO from:"
-    print_warning "https://asahilinux.org/fedora/"
-    print_warning "And place it as 'asahi-installer.iso' in this directory"
-    print_warning ""
-    print_warning "For now, creating a placeholder. You'll need to:"
-    print_warning "1. Download the Asahi installer ISO"
-    print_warning "2. Add it to the UTM VM as a CD/DVD drive"
-    print_warning "3. Boot from the ISO to install Asahi Linux"
+    print_status "Attempting to download Asahi Linux installer ISO..."
     
-    # Create placeholder
-    touch "$ASAHI_ISO"
+    # Try to download the latest Asahi installer
+    ASAHI_DOWNLOAD_URL="https://cdn.asahilinux.org/os/installer/latest/asahi-installer.iso"
+    
+    if curl -L -o "$ASAHI_ISO" "$ASAHI_DOWNLOAD_URL"; then
+        print_status "Successfully downloaded Asahi Linux installer ISO!"
+        # Cache it for future use
+        cp "$ASAHI_ISO" "$OUTPUT_DIR/asahi-installer.iso" 2>/dev/null || true
+    else
+        print_warning "Failed to download Asahi installer automatically."
+        print_warning "Please download the latest Asahi Linux installer ISO from:"
+        print_warning "https://asahilinux.org/fedora/"
+        print_warning "And place it as 'asahi-installer.iso' in this directory"
+        print_warning ""
+        print_warning "For now, creating a placeholder. You'll need to:"
+        print_warning "1. Download the Asahi installer ISO"
+        print_warning "2. Add it to the UTM VM as a CD/DVD drive"
+        print_warning "3. Boot from the ISO to install Asahi Linux"
+        
+        # Create placeholder
+        touch "$ASAHI_ISO"
+    fi
 fi
 
 # Create configuration.plist for UTM
 print_status "Creating UTM configuration..."
+
+# Detect UTM version for compatibility
+detect_utm_version() {
+    local utm_version="3"  # Default to version 3
+    
+    if [[ -d "/Applications/UTM.app" ]]; then
+        # Try to get version from UTM.app
+        local info_plist="/Applications/UTM.app/Contents/Info.plist"
+        if [[ -f "$info_plist" ]]; then
+            local version=$(defaults read "$info_plist" CFBundleShortVersionString 2>/dev/null)
+            if [[ -n "$version" ]]; then
+                print_status "Detected UTM version: $version"
+                # Map version to configuration version
+                case "$version" in
+                    4.*|5.*|6.*)
+                        utm_version="4"
+                        ;;
+                    3.*)
+                        utm_version="3"
+                        ;;
+                    2.*)
+                        utm_version="2"
+                        ;;
+                    *)
+                        utm_version="3"  # Default fallback
+                        ;;
+                esac
+            fi
+        fi
+    fi
+    
+    echo "$utm_version"
+}
+
 create_utm_config() {
+    local config_version=$(detect_utm_version)
+    print_status "Using UTM configuration version: $config_version"
+    
+    # Create the VM configuration
+    print_status "Creating UTM configuration..."
+    create_manual_config
+}
+
+create_manual_config() {
+    # Create a very basic configuration that should work
     cat > "$UTM_DIR/config.plist" << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -104,15 +222,11 @@ create_utm_config() {
     <key>Backend</key>
     <string>Apple</string>
     <key>ConfigurationVersion</key>
-    <integer>4</integer>
+    <integer>1</integer>
     <key>Information</key>
     <dict>
-        <key>IconURL</key>
-        <string></string>
         <key>Name</key>
         <string>LnOS Asahi Linux</string>
-        <key>Notes</key>
-        <string>LnOS custom Arch Linux installer for Apple Silicon Macs</string>
         <key>UUID</key>
         <string>PLACEHOLDER_UUID</string>
     </dict>
@@ -120,14 +234,6 @@ create_utm_config() {
     <dict>
         <key>Architecture</key>
         <string>aarch64</string>
-        <key>Boot</key>
-        <dict>
-            <key>BootOrder</key>
-            <array>
-                <string>PLACEHOLDER_DRIVE_UUID</string>
-                <string>PLACEHOLDER_CDROM_UUID</string>
-            </array>
-        </dict>
         <key>CPU</key>
         <dict>
             <key>CoreCount</key>
@@ -139,29 +245,6 @@ create_utm_config() {
             <integer>PLACEHOLDER_MEMORY_SIZE</integer>
         </dict>
     </dict>
-    <key>Virtualization</key>
-    <dict>
-        <key>Keyboard</key>
-        <dict>
-            <key>IsEnabled</key>
-            <true/>
-        </dict>
-        <key>PointingDevice</key>
-        <dict>
-            <key>IsEnabled</key>
-            <true/>
-        </dict>
-        <key>Rosetta</key>
-        <dict>
-            <key>IsEnabled</key>
-            <true/>
-        </dict>
-        <key>Clipboard</key>
-        <dict>
-            <key>IsEnabled</key>
-            <true/>
-        </dict>
-    </dict>
     <key>Drives</key>
     <array>
         <dict>
@@ -171,22 +254,6 @@ create_utm_config() {
             <string>disk0.qcow2</string>
             <key>ImageType</key>
             <string>Disk</string>
-            <key>Interface</key>
-            <string>VirtIO</string>
-            <key>Removable</key>
-            <false/>
-        </dict>
-        <dict>
-            <key>Identifier</key>
-            <string>PLACEHOLDER_CDROM_UUID</string>
-            <key>ImageName</key>
-            <string>asahi-installer.iso</string>
-            <key>ImageType</key>
-            <string>CD</string>
-            <key>Interface</key>
-            <string>USB</string>
-            <key>Removable</key>
-            <true/>
         </dict>
     </array>
     <key>Networks</key>
@@ -194,30 +261,15 @@ create_utm_config() {
         <dict>
             <key>Enabled</key>
             <true/>
-            <key>Mode</key>
-            <string>Shared</string>
         </dict>
     </array>
     <key>Displays</key>
     <array>
         <dict>
-            <key>Hardware</key>
-            <string>VirtIO-GPU</string>
             <key>PixelsHigh</key>
             <integer>1024</integer>
             <key>PixelsWide</key>
             <integer>1280</integer>
-        </dict>
-    </array>
-    <key>SharedDirectories</key>
-    <array>
-        <dict>
-            <key>DirectoryURL</key>
-            <string>file://PLACEHOLDER_SHARED_DIR</string>
-            <key>Name</key>
-            <string>lnos-scripts</string>
-            <key>ReadOnly</key>
-            <true/>
         </dict>
     </array>
 </dict>
@@ -228,24 +280,17 @@ EOF
     if command -v uuidgen &> /dev/null; then
         MAIN_UUID=$(uuidgen)
         DRIVE_UUID=$(uuidgen)
-        CDROM_UUID=$(uuidgen)
     else
         # Simple fallback UUID generation for systems without uuidgen
         MAIN_UUID="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "550E8400-E29B-41D4-A716-446655440$(date +%03d)")"
         DRIVE_UUID="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "550E8400-E29B-41D4-A716-446655441$(date +%03d)")"
-        CDROM_UUID="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "550E8400-E29B-41D4-A716-446655442$(date +%03d)")"
     fi
-    
-                 # Set up shared directory for LnOS scripts
-    SHARED_DIR_URL="file://$UTM_DIR/Data/lnos-scripts"
     
     # Use perl for more reliable cross-platform text replacement
     perl -i -pe "s/PLACEHOLDER_UUID/$MAIN_UUID/g" "$UTM_DIR/config.plist"
     perl -i -pe "s/PLACEHOLDER_DRIVE_UUID/$DRIVE_UUID/g" "$UTM_DIR/config.plist"
-    perl -i -pe "s/PLACEHOLDER_CDROM_UUID/$CDROM_UUID/g" "$UTM_DIR/config.plist"
     perl -i -pe "s/PLACEHOLDER_CPU_CORES/$CPU_CORES/g" "$UTM_DIR/config.plist"
     perl -i -pe "s/PLACEHOLDER_MEMORY_SIZE/$MEMORY_SIZE_MB/g" "$UTM_DIR/config.plist"
-    perl -i -pe "s|file://PLACEHOLDER_SHARED_DIR|$SHARED_DIR_URL|g" "$UTM_DIR/config.plist"
 }
 
 create_utm_config
@@ -579,9 +624,15 @@ print_status "Location: $UTM_DIR"
 print_status ""
 print_status "Next steps:"
 print_status "1. Double-click ${UTM_NAME}.utm to open in UTM"
-print_status "2. Start the VM to begin Asahi Linux installation"
-print_status "3. Follow the setup instructions in the VM"
-print_status "4. The LnOS installer will start automatically after setup"
+print_status "2. If import fails, try creating a new VM manually in UTM:"
+print_status "   - Architecture: aarch64"
+print_status "   - Memory: ${MEMORY_SIZE_MB}MB"
+print_status "   - CPU Cores: $CPU_CORES"
+print_status "   - Add the disk image: $DISK_IMAGE"
+print_status "   - Add the Asahi ISO as CD-ROM: $ASAHI_ISO"
+print_status "3. Start the VM to begin Asahi Linux installation"
+print_status "4. Follow the setup instructions in the VM"
+print_status "5. The LnOS installer will start automatically after setup"
 print_status ""
 print_status "The VM includes:"
 print_status "✓ Asahi Linux installer ISO (if available)"

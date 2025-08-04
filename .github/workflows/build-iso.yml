@@ -7,9 +7,6 @@ on:
       - 'archiso/**'
       - 'scripts/**'
       - '.github/workflows/build-iso.yml'
-      - 'build-iso.sh'
-      - 'build-arm-image.sh'
-      - 'build-utm-asahi.sh'
       - 'utm-templates/**'
   pull_request:
     branches: [ main, ISO ]
@@ -17,9 +14,6 @@ on:
       - 'archiso/**'
       - 'scripts/**'
       - '.github/workflows/build-iso.yml'
-      - 'build-iso.sh'
-      - 'build-arm-image.sh'
-      - 'build-utm-asahi.sh'
       - 'utm-templates/**'
   workflow_dispatch:
     inputs:
@@ -66,11 +60,11 @@ jobs:
               pacman -S --noconfirm base-devel git archiso grub
               
               # Make scripts executable
-              chmod +x build-iso.sh
+              chmod +x ./scripts/build-iso.sh
               chmod +x archiso/airootfs/root/customize_airootfs.sh
               
               # Build the ISO
-              ./build-iso.sh x86_64
+              ./scripts/build-iso.sh x86_64
             "
 
       - name: Upload x86_64 ISO artifact
@@ -127,7 +121,7 @@ jobs:
               echo "=== DISK SPACE AFTER CLEANUP ==="
               df -h
               
-              chmod +x build-arm-image.sh build-arm-minimal.sh
+              chmod +x ./scripts/build-arm-image.sh ./scripts/build-arm-minimal.sh
               
               # Check disk space before building images
               echo "=== DISK SPACE BEFORE IMAGE BUILD ==="
@@ -135,14 +129,14 @@ jobs:
               
               # Build minimal ARM64 SD card image first (smaller, faster)
               echo "=== BUILDING MINIMAL ARM IMAGE ==="
-              ./build-arm-minimal.sh rpi4
+              ./scripts/build-arm-minimal.sh rpi4
               
               echo "=== DISK SPACE AFTER MINIMAL BUILD ==="
               df -h
               
               # Build full ARM64 SD card image
               echo "=== BUILDING FULL ARM IMAGE ==="
-              ./build-arm-image.sh rpi4
+              ./scripts/build-arm-image.sh rpi4
               
               echo "=== DISK SPACE AFTER FULL BUILD ==="
               df -h
@@ -203,13 +197,13 @@ jobs:
 
       - name: Build UTM Virtual Machine
         run: |
-          chmod +x build-utm-asahi.sh
+          chmod +x ./scripts/build-utm-asahi.sh
           
           # Create directory structure if needed
           mkdir -p out
           
           # Build the UTM VM
-          ./build-utm-asahi.sh --zip
+          ./scripts/build-utm-asahi.sh --zip
           
           # Verify output
           ls -la out/

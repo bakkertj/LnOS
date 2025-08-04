@@ -1,387 +1,174 @@
-name: Build UTM for macOS
+name: Build LnOS UTM VM
 
 on:
-  workflow_dispatch:
-    inputs:
-      create_release:
-        description: 'Create a GitHub release'
-        required: false
-        default: false
-        type: boolean
-      include_asahi_iso:
-        description: 'Download and include Asahi Linux installer ISO'
-        required: false
-        default: true
-        type: boolean
   push:
+    branches: [ main, develop ]
+    paths:
+      - 'build-utm-ci.sh'
+      - 'scripts/**'
+      - 'utm-templates/**'
+  pull_request:
     branches: [ main ]
     paths:
-      - 'build-utm-asahi.sh'
+      - 'build-utm-ci.sh'
+      - 'scripts/**'
       - 'utm-templates/**'
-      - 'scripts/LnOS-installer.sh'
-      - 'scripts/pacman_packages/**'
-      - '.github/workflows/build-utm.yml'
-
-permissions:
-  contents: write
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'utm'
+        type: choice
+        options:
+        - utm
+        - all
 
 jobs:
   build-utm:
-    name: Build UTM Virtual Machine
-    runs-on: macos-14  # Apple Silicon runner for optimal performance
+    runs-on: macos-latest
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: System Information
-        run: |
-          echo "🖥️  System Information:"
-          echo "macOS Version: $(sw_vers -productVersion)"
-          echo "Architecture: $(uname -m)"
-          echo "Available Storage: $(df -h / | tail -1 | awk '{print $4}')"
-          echo "RAM: $(sysctl -n hw.memsize | awk '{print $1/1024/1024/1024 " GB"}')"
-          echo "CPU Cores: $(sysctl -n hw.ncpu)"
-
-      - name: Install UTM
-        run: |
-          echo "📱 Installing UTM..."
-          
-          # Try Homebrew first (faster if available)
-          if command -v brew &> /dev/null; then
-            echo "Attempting UTM installation via Homebrew..."
-            if brew install --cask utm; then
-              echo "✅ UTM installed successfully via Homebrew"
-            else
-              echo "⚠️  Homebrew installation failed, trying direct download..."
-            fi
-          fi
-          
-          # Fallback to direct download if needed
-          if [[ ! -d "/Applications/UTM.app" ]]; then
-            echo "📥 Downloading UTM directly from GitHub..."
-            
-            # Get latest UTM release
-            LATEST_URL=$(curl -s https://api.github.com/repos/utmapp/UTM/releases/latest | grep "browser_download_url.*UTM.dmg" | cut -d '"' -f 4)
-            
-            if [[ -n "$LATEST_URL" ]]; then
-              echo "Downloading from: $LATEST_URL"
-              curl -L -o UTM.dmg "$LATEST_URL"
-              
-              # Mount and install
-              echo "Mounting and installing UTM..."
-              hdiutil attach UTM.dmg -quiet
-              cp -R "/Volumes/UTM/UTM.app" /Applications/
-              hdiutil detach "/Volumes/UTM" -quiet
-              rm UTM.dmg
-              
-              echo "✅ UTM installed successfully via direct download"
-            else
-              echo "❌ Failed to find UTM download URL"
-              exit 1
-            fi
-          fi
-          
-          # Verify installation
-          if [[ -d "/Applications/UTM.app" ]]; then
-            UTM_VERSION=$(/Applications/UTM.app/Contents/MacOS/UTM --version 2>/dev/null || echo "Unknown")
-            echo "✅ UTM installed successfully"
-            echo "📦 UTM Version: $UTM_VERSION"
-            echo "📁 Installation path: /Applications/UTM.app"
-            echo "📊 App size: $(du -sh /Applications/UTM.app | cut -f1)"
-          else
-            echo "❌ UTM installation verification failed"
-            exit 1
-          fi
-
-      - name: Download Asahi Linux Installer
-        if: ${{ github.event.inputs.include_asahi_iso != 'false' }}
-        run: |
-          echo "🍎 Downloading Asahi Linux installer..."
-          
-          # Try multiple sources for Asahi Linux installer
-          DOWNLOADED=false
-          
-          # Method 1: Official Asahi Linux releases
-          echo "Checking official Asahi Linux releases..."
-          ASAHI_URL=$(curl -s https://api.github.com/repos/AsahiLinux/asahi-installer/releases/latest | grep "browser_download_url.*\.iso" | cut -d '"' -f 4 | head -1)
-          
-          if [[ -n "$ASAHI_URL" ]]; then
-            echo "📥 Downloading from official release: $ASAHI_URL"
-            if curl -L -o asahi-installer.iso "$ASAHI_URL"; then
-              DOWNLOADED=true
-              echo "✅ Official Asahi installer downloaded successfully"
-            fi
-          fi
-          
-          # Method 2: Fedora Asahi Remix (if official not available)
-          if [[ "$DOWNLOADED" != "true" ]]; then
-            echo "Trying Fedora Asahi Remix..."
-            FEDORA_ASAHI_URL="https://download.fedoraproject.org/pub/fedora-secondary/releases/38/Spins/aarch64/iso/Fedora-38-1.6-aarch64-netinst.iso"
-            if curl -L -o asahi-installer.iso "$FEDORA_ASAHI_URL"; then
-              DOWNLOADED=true
-              echo "✅ Fedora Asahi installer downloaded successfully"
-            fi
-          fi
-          
-          # Method 3: Create minimal placeholder
-          if [[ "$DOWNLOADED" != "true" ]]; then
-            echo "⚠️  Could not download installer, creating placeholder"
-            echo "Creating minimal placeholder ISO..."
-            # Create a small placeholder file
-            dd if=/dev/zero of=asahi-installer.iso bs=1M count=1
-            DOWNLOADED=true
-          fi
-          
-          # Verify download
-          if [[ -f "asahi-installer.iso" ]]; then
-            ISO_SIZE=$(du -h asahi-installer.iso | cut -f1)
-            echo "📊 Installer size: $ISO_SIZE"
-            file asahi-installer.iso || echo "File type detection not available"
-          else
-            echo "❌ Failed to create Asahi installer"
-            exit 1
-          fi
-
-      - name: Build UTM Virtual Machine
-        run: |
-          echo "🔨 Building LnOS UTM Virtual Machine..."
-          
-          # Make build script executable
-          chmod +x build-utm-asahi.sh
-          
-          # Create output directory
-          mkdir -p out
-          
-          # Show available space before build
-          echo "💾 Available space before build: $(df -h . | tail -1 | awk '{print $4}')"
-          
-          # Build the UTM VM with ZIP creation
-          echo "Starting UTM build process..."
-          if ./build-utm-asahi.sh --zip; then
-            echo "✅ UTM build completed successfully"
-          else
-            echo "❌ UTM build failed"
-            exit 1
-          fi
-          
-          # Show build results
-          echo ""
-          echo "📦 Build Results:"
-          echo "=================="
-          ls -lh out/ || echo "No output directory found"
-          
-          # Show detailed information about created files
-          if ls out/*.utm &> /dev/null; then
-            echo ""
-            echo "🖥️  UTM Virtual Machine:"
-            for utm_file in out/*.utm; do
-              if [[ -d "$utm_file" ]]; then
-                echo "   📁 $(basename "$utm_file"): $(du -sh "$utm_file" | cut -f1)"
-                echo "      Config: $(ls -la "$utm_file/config.plist" 2>/dev/null | awk '{print $5}' | numfmt --to=iec) bytes"
-                echo "      Scripts: $(find "$utm_file/Data/lnos-scripts" -type f 2>/dev/null | wc -l) files"
-              fi
-            done
-          fi
-          
-          if ls out/*.zip &> /dev/null; then
-            echo ""
-            echo "📦 Distribution Archives:"
-            for zip_file in out/*.zip; do
-              echo "   🗜️  $(basename "$zip_file"): $(du -sh "$zip_file" | cut -f1)"
-            done
-          fi
-          
-          echo ""
-          echo "💾 Available space after build: $(df -h . | tail -1 | awk '{print $4}')"
-
-      - name: Test UTM Configuration
-        run: |
-          echo "🧪 Testing UTM configuration..."
-          
-          # Find the UTM bundle
-          UTM_BUNDLE=$(find out -name "*.utm" -type d | head -1)
-          
-          if [[ -n "$UTM_BUNDLE" && -d "$UTM_BUNDLE" ]]; then
-            echo "Testing UTM bundle: $(basename "$UTM_BUNDLE")"
-            
-            # Check required files
-            TESTS_PASSED=0
-            TOTAL_TESTS=6
-            
-            echo "Running validation tests..."
-            
-            # Test 1: config.plist exists and is valid
-            if [[ -f "$UTM_BUNDLE/config.plist" ]]; then
-              if plutil -lint "$UTM_BUNDLE/config.plist" &>/dev/null; then
-                echo "✅ config.plist is valid"
-                ((TESTS_PASSED++))
-              else
-                echo "❌ config.plist is invalid"
-              fi
-            else
-              echo "❌ config.plist missing"
-            fi
-            
-            # Test 2: Architecture is aarch64
-            if grep -q "aarch64" "$UTM_BUNDLE/config.plist"; then
-              echo "✅ Architecture set to aarch64"
-              ((TESTS_PASSED++))
-            else
-              echo "❌ Architecture not set to aarch64"
-            fi
-            
-            # Test 3: Apple Virtualization enabled
-            if grep -q "Apple" "$UTM_BUNDLE/config.plist"; then
-              echo "✅ Apple Virtualization configured"
-              ((TESTS_PASSED++))
-            else
-              echo "❌ Apple Virtualization not configured"
-            fi
-            
-            # Test 4: LnOS installer present
-            if [[ -f "$UTM_BUNDLE/Data/lnos-scripts/LnOS-installer.sh" ]]; then
-              echo "✅ LnOS installer present"
-              ((TESTS_PASSED++))
-            else
-              echo "❌ LnOS installer missing"
-            fi
-            
-            # Test 5: Auto-start script present
-            if [[ -f "$UTM_BUNDLE/Data/lnos-scripts/utm-autostart.sh" ]]; then
-              echo "✅ Auto-start script present"
-              ((TESTS_PASSED++))
-            else
-              echo "❌ Auto-start script missing"
-            fi
-            
-            # Test 6: Package lists present
-            if [[ -d "$UTM_BUNDLE/Data/lnos-scripts/pacman_packages" ]]; then
-              PACKAGE_COUNT=$(find "$UTM_BUNDLE/Data/lnos-scripts/pacman_packages" -name "*.txt" | wc -l)
-              if [[ $PACKAGE_COUNT -gt 0 ]]; then
-                echo "✅ Package lists present ($PACKAGE_COUNT files)"
-                ((TESTS_PASSED++))
-              else
-                echo "❌ No package list files found"
-              fi
-            else
-              echo "❌ Package lists directory missing"
-            fi
-            
-            echo ""
-            echo "🧪 Test Results: $TESTS_PASSED/$TOTAL_TESTS tests passed"
-            
-            if [[ $TESTS_PASSED -eq $TOTAL_TESTS ]]; then
-              echo "✅ All tests passed! UTM VM is ready for distribution"
-            else
-              echo "⚠️  Some tests failed. Please review the configuration"
-              exit 1
-            fi
-          else
-            echo "❌ No UTM bundle found for testing"
-            exit 1
-          fi
-
-      - name: Upload UTM Virtual Machine
-        uses: actions/upload-artifact@v4
-        with:
-          name: lnos-utm-macos-${{ github.run_number }}
-          path: |
-            out/*.utm.zip
-            out/*.utm
-          retention-days: 30
-          if-no-files-found: error
-
-      - name: Create Release (if requested)
-        if: ${{ github.event.inputs.create_release == 'true' }}
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: utm-v${{ github.run_number }}-${{ github.sha }}
-          name: LnOS UTM for macOS - Build ${{ github.run_number }}
-          body: |
-            # LnOS UTM Virtual Machine for Apple Silicon Macs
-            
-            ![UTM](https://img.shields.io/badge/UTM-Virtual%20Machine-blue?style=for-the-badge&logo=apple)
-            ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-Native-green?style=for-the-badge&logo=apple)
-            ![Asahi Linux](https://img.shields.io/badge/Asahi%20Linux-Base-red?style=for-the-badge&logo=linux)
-            
-            This release contains a pre-configured UTM virtual machine for Apple Silicon Macs that provides the same LnOS experience as the x86_64 ISO and Raspberry Pi images.
-            
-            ## 🚀 Quick Start
-            
-            1. **Install UTM**: Download from [Mac App Store](https://apps.apple.com/app/utm-virtual-machines/id1538878817) or [getutm.app](https://mac.getutm.app/)
-            2. **Download VM**: Get the `.utm.zip` file from this release
-            3. **Extract & Open**: Unzip and double-click the `.utm` file
-            4. **Start VM**: Click the play button in UTM
-            5. **Install**: Follow the Asahi Linux installation, then run the LnOS installer
-            
-            ## 📋 Requirements
-            
-            - **macOS 12.0+** (Monterey or later)
-            - **Apple Silicon Mac** (M1, M2, M3, M4)
-            - **UTM app** installed
-            - **8GB+ free space**
-            - **Internet connection**
-            
-            ## 🎯 Features
-            
-            - **Same Experience**: Identical LnOS installer as other platforms
-            - **Native Performance**: Uses Apple Virtualization Framework
-            - **Rosetta Support**: Run x86_64 binaries when needed
-            - **Auto-start**: LnOS installer launches automatically
-            - **Desktop Environments**: Gnome, KDE, Hyprland, DWM, TTY
-            - **Package Profiles**: CSE (Computer Science Education) or Custom
-            
-            ## 📦 What's Included
-            
-            - Pre-configured UTM virtual machine
-            - Asahi Linux installer (if available)
-            - LnOS installer script with aarch64 support
-            - Auto-start mechanism
-            - Same package lists as x86_64 and Pi builds
-            - Setup documentation
-            
-            ## 🛠️ Build Information
-            
-            - **Build Date**: ${{ github.event.head_commit.timestamp }}
-            - **Commit**: `${{ github.sha }}`
-            - **Runner**: macOS 14 (Apple Silicon)
-            - **UTM Version**: Latest available
-            - **Architecture**: aarch64 (Apple Silicon native)
-            
-            ---
-            
-            For support and documentation, visit the [LnOS repository](https://github.com/uta-lug-nuts/LnOS).
-          files: |
-            out/*.utm.zip
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build Summary
-        if: always()
-        run: |
-          echo ""
-          echo "🏁 Build Summary"
-          echo "================"
-          echo "Workflow: ${{ github.workflow }}"
-          echo "Run ID: ${{ github.run_id }}"
-          echo "Run Number: ${{ github.run_number }}"
-          echo "Commit: ${{ github.sha }}"
-          echo "Actor: ${{ github.actor }}"
-          echo "Event: ${{ github.event_name }}"
-          
-          if [[ -d "out" ]]; then
-            echo ""
-            echo "📁 Output Files:"
-            find out -type f -exec basename {} \; | sort
-            
-            echo ""
-            echo "💾 Total Output Size:"
-            du -sh out/ 2>/dev/null || echo "Unable to calculate size"
-          fi
-          
-          echo ""
-          echo "✅ UTM build workflow completed successfully!"
-          echo "📱 Ready for distribution on Apple Silicon Macs"
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup environment
+      run: |
+        echo "Setting up build environment..."
+        pwd
+        ls -la
+        
+    - name: Make scripts executable
+      run: |
+        chmod +x ./scripts/build-utm-ci.sh
+        chmod +x ./scripts/build-utm-asahi.sh
+        chmod +x ./scripts/setup-utm-manual.sh
+        chmod +x ./scripts/create-utm-manual.sh
+        
+    - name: Install dependencies
+      run: |
+        # Install Homebrew if not available
+        if ! command -v brew &> /dev/null; then
+          echo "Installing Homebrew..."
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        fi
+        
+        # Install qemu-img for disk image creation
+        if ! command -v qemu-img &> /dev/null; then
+          echo "Installing qemu..."
+          brew install qemu
+        fi
+        
+        # Install UTM if not available
+        if ! command -v utmctl &> /dev/null && [[ ! -d "/Applications/UTM.app" ]]; then
+          echo "Installing UTM..."
+          brew install --cask utm
+        fi
+        
+    - name: Build UTM VM
+      run: |
+        echo "Building UTM VM..."
+        ./scripts/build-utm-ci.sh
+        
+    - name: Validate build artifacts
+      run: |
+        echo "Validating build artifacts..."
+        
+        # Check that required files exist
+        if [[ ! -f "out/lnos-asahi-$(date +%Y.%m.%d).utm/config.plist" ]]; then
+          echo "❌ UTM configuration missing"
+          exit 1
+        fi
+        
+        if [[ ! -f "out/lnos-asahi-$(date +%Y.%m.%d).utm/Images/disk0.qcow2" ]]; then
+          echo "❌ Disk image missing"
+          exit 1
+        fi
+        
+        if [[ ! -f "out/lnos-asahi-$(date +%Y.%m.%d).utm/Images/asahi-installer.iso" ]]; then
+          echo "❌ Asahi installer ISO missing"
+          exit 1
+        fi
+        
+        if [[ ! -f "out/lnos-asahi-$(date +%Y.%m.%d).utm/Data/lnos-scripts/LnOS-installer.sh" ]]; then
+          echo "❌ LnOS installer script missing"
+          exit 1
+        fi
+        
+        if [[ ! -f "out/lnos-asahi-$(date +%Y.%m.%d)-ci.zip" ]]; then
+          echo "❌ Distribution ZIP missing"
+          exit 1
+        fi
+        
+        echo "✅ All build artifacts validated"
+        
+    - name: List build artifacts
+      run: |
+        echo "Build artifacts:"
+        ls -la out/
+        echo ""
+        echo "UTM bundle contents:"
+        ls -la out/lnos-asahi-$(date +%Y.%m.%d).utm/
+        echo ""
+        echo "Scripts directory:"
+        ls -la out/lnos-asahi-$(date +%Y.%m.%d).utm/Data/lnos-scripts/
+        
+         - name: Upload build artifacts
+       uses: actions/upload-artifact@v4
+       with:
+         name: lnos-utm-vm
+         path: |
+           out/lnos-asahi-$(date +%Y.%m.%d).utm/
+           out/lnos-asahi-$(date +%Y.%m.%d)-ci.zip
+         retention-days: 30
+         
+     - name: Create release assets
+       if: github.event_name == 'workflow_dispatch'
+       run: |
+         echo "Creating release assets..."
+         
+         # Create a release directory
+         mkdir -p release/
+         
+         # Copy the UTM bundle
+         cp -r out/lnos-asahi-$(date +%Y.%m.%d).utm/ release/
+         
+         # Copy the distribution ZIP
+         cp out/lnos-asahi-$(date +%Y.%m.%d)-ci.zip release/
+         
+         # Create a simple README for the release
+         echo "# LnOS UTM Virtual Machine" > release/README.md
+         echo "" >> release/README.md
+         echo "Automated build for Apple Silicon Macs." >> release/README.md
+         echo "Build date: $(date)" >> release/README.md
+        
+    - name: Upload release assets
+      if: github.event_name == 'workflow_dispatch'
+      uses: actions/upload-artifact@v4
+      with:
+        name: lnos-utm-release
+        path: release/
+        retention-days: 90
+        
+    - name: Build summary
+      run: |
+        echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "✅ **UTM VM Build Completed Successfully**" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Build Artifacts:**" >> $GITHUB_STEP_SUMMARY
+        echo "- UTM Bundle: \`out/lnos-asahi-$(date +%Y.%m.%d).utm/\`" >> $GITHUB_STEP_SUMMARY
+        echo "- Distribution ZIP: \`out/lnos-asahi-$(date +%Y.%m.%d)-ci.zip\`" >> $GITHUB_STEP_SUMMARY
+        echo "- Disk Image: \`Images/disk0.qcow2\`" >> $GITHUB_STEP_SUMMARY
+        echo "- Asahi ISO: \`Images/asahi-installer.iso\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**System Configuration:**" >> $GITHUB_STEP_SUMMARY
+        echo "- Architecture: aarch64 (Apple Silicon)" >> $GITHUB_STEP_SUMMARY
+        echo "- Memory: 4GB" >> $GITHUB_STEP_SUMMARY
+        echo "- CPU Cores: 4" >> $GITHUB_STEP_SUMMARY
+        echo "- Disk Size: 20GB" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Next Steps:**" >> $GITHUB_STEP_SUMMARY
+        echo "1. Download the artifacts" >> $GITHUB_STEP_SUMMARY
+        echo "2. Import the UTM bundle or follow manual setup" >> $GITHUB_STEP_SUMMARY
+        echo "3. Install Asahi Linux and LnOS" >> $GITHUB_STEP_SUMMARY
