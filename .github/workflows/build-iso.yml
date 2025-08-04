@@ -9,6 +9,8 @@ on:
       - '.github/workflows/build-iso.yml'
       - 'build-iso.sh'
       - 'build-arm-image.sh'
+      - 'build-utm-asahi.sh'
+      - 'utm-templates/**'
   pull_request:
     branches: [ main, ISO ]
     paths:
@@ -17,6 +19,8 @@ on:
       - '.github/workflows/build-iso.yml'
       - 'build-iso.sh'
       - 'build-arm-image.sh'
+      - 'build-utm-asahi.sh'
+      - 'utm-templates/**'
   workflow_dispatch:
     inputs:
       architecture:
@@ -27,7 +31,8 @@ on:
         options:
           - 'x86_64'
           - 'aarch64'
-          - 'both'
+          - 'utm-macos'
+          - 'all'
 
 # add write permissions
 permissions:
@@ -35,7 +40,7 @@ permissions:
 
 jobs:
   build-x86_64:
-    if: ${{ github.event.inputs.architecture == 'x86_64' || github.event.inputs.architecture == 'both' || github.event.inputs.architecture == '' }}
+    if: ${{ github.event.inputs.architecture == 'x86_64' || github.event.inputs.architecture == 'all' || github.event.inputs.architecture == '' }}
     runs-on: ubuntu-latest
     
     steps:
@@ -76,7 +81,7 @@ jobs:
           retention-days: 30
 
   build-aarch64:
-    if: ${{ github.event.inputs.architecture == 'aarch64' || github.event.inputs.architecture == 'both' || github.event.inputs.architecture == '' }}
+    if: ${{ github.event.inputs.architecture == 'aarch64' || github.event.inputs.architecture == 'all' || github.event.inputs.architecture == '' }}
     runs-on: ubuntu-latest
     
     steps:
@@ -150,6 +155,73 @@ jobs:
           path: out/*.img
           retention-days: 30
 
+  build-utm-macos:
+    if: ${{ github.event.inputs.architecture == 'utm-macos' || github.event.inputs.architecture == 'all' }}
+    runs-on: macos-14  # Apple Silicon runner
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install UTM
+        run: |
+          # Install UTM via Homebrew (if available) or direct download
+          if command -v brew &> /dev/null; then
+            # Try Homebrew first
+            brew install --cask utm || echo "UTM not available via Homebrew"
+          fi
+          
+          # If UTM not installed, download directly
+          if [[ ! -d "/Applications/UTM.app" ]]; then
+            echo "Downloading UTM directly..."
+            curl -L -o utm.dmg "https://github.com/utmapp/UTM/releases/latest/download/UTM.dmg"
+            hdiutil attach utm.dmg
+            cp -R "/Volumes/UTM/UTM.app" /Applications/
+            hdiutil detach "/Volumes/UTM"
+            rm utm.dmg
+          fi
+          
+          # Verify installation
+          ls -la /Applications/UTM.app || echo "UTM installation verification failed"
+
+      - name: Download Asahi Linux installer (if available)
+        run: |
+          # Try to download the latest Asahi Linux installer
+          # This step is optional and will continue even if it fails
+          echo "Attempting to download Asahi Linux installer..."
+          
+          # Check for latest Asahi release
+          ASAHI_URL=$(curl -s https://api.github.com/repos/AsahiLinux/asahi-installer/releases/latest | grep "browser_download_url.*\.iso" | cut -d '"' -f 4 | head -1)
+          
+          if [[ -n "$ASAHI_URL" ]]; then
+            echo "Downloading Asahi installer from: $ASAHI_URL"
+            curl -L -o asahi-installer.iso "$ASAHI_URL" || echo "Download failed, continuing without ISO"
+          else
+            echo "No Asahi installer ISO found in releases, creating placeholder"
+            touch asahi-installer.iso
+          fi
+
+      - name: Build UTM Virtual Machine
+        run: |
+          chmod +x build-utm-asahi.sh
+          
+          # Create directory structure if needed
+          mkdir -p out
+          
+          # Build the UTM VM
+          ./build-utm-asahi.sh --zip
+          
+          # Verify output
+          ls -la out/
+          echo "UTM build completed"
+
+      - name: Upload UTM Virtual Machine
+        uses: actions/upload-artifact@v4
+        with:
+          name: lnos-utm-macos
+          path: out/*.utm.zip
+          retention-days: 30
+
   create-release:
     if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ISO') && github.event_name == 'push'
     needs: [build-x86_64, build-aarch64]
@@ -170,6 +242,13 @@ jobs:
         with:
           name: lnos-aarch64-sdcard
           path: ./isos/
+
+      - name: Download UTM macOS Virtual Machine (if available)
+        uses: actions/download-artifact@v4
+        with:
+          name: lnos-utm-macos
+          path: ./isos/
+        continue-on-error: true  # Don't fail if UTM job was skipped
 
       - name: Check file sizes for compression decision
         run: |
@@ -240,7 +319,7 @@ jobs:
           echo "📋 Using GPG key: $KEY_ID"
           
           # Sign all release files
-          for file in *.iso *.img *.xz; do
+          for file in *.iso *.img *.xz *.utm.zip; do
             if [ -f "$file" ]; then
               echo "🔏 Signing: $file"
               
@@ -304,6 +383,7 @@ jobs:
             ### Files Included:
             - **x86_64 ISO/IMG**: For VMs, Intel/AMD computers, and USB boot
             - **ARM64 IMG**: SD card image for Raspberry Pi 4 and ARM64 devices
+            - **UTM VM (macOS)**: Virtual machine for Apple Silicon Macs with UTM app
             - **Digital Signatures**: `.asc` files for verifying authenticity
             
             **Note**: Large files (>1GB) are compressed with XZ to stay under GitHub's 2GB limit. Files under 1GB are uncompressed and ready to use.
