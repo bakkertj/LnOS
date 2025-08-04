@@ -2,13 +2,13 @@ name: Build LnOS UTM VM
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, MacOS ]
     paths:
       - 'build-utm-ci.sh'
       - 'scripts/**'
       - 'utm-templates/**'
   pull_request:
-    branches: [ main ]
+    branches: [ main, MacOS ]
     paths:
       - 'build-utm-ci.sh'
       - 'scripts/**'
