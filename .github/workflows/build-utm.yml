@@ -120,27 +120,27 @@ jobs:
         path: |
           out/lnos-asahi-$(date +%Y.%m.%d).utm/
           out/lnos-asahi-$(date +%Y.%m.%d)-ci.zip
-                 retention-days: 30
+        retention-days: 30
          
-     - name: Create release assets
-       if: github.event_name == 'workflow_dispatch'
-       run: |
-         echo "Creating release assets..."
-         
-         # Create a release directory
-         mkdir -p release/
-         
-         # Copy the UTM bundle
-         cp -r out/lnos-asahi-$(date +%Y.%m.%d).utm/ release/
-         
-         # Copy the distribution ZIP
-         cp out/lnos-asahi-$(date +%Y.%m.%d)-ci.zip release/
-         
-         # Create a simple README for the release
-         echo "# LnOS UTM Virtual Machine" > release/README.md
-         echo "" >> release/README.md
-         echo "Automated build for Apple Silicon Macs." >> release/README.md
-         echo "Build date: $(date)" >> release/README.md
+    - name: Create release assets
+      if: github.event_name == 'workflow_dispatch'
+      run: |
+        echo "Creating release assets..."
+        
+        # Create a release directory
+        mkdir -p release/
+        
+        # Copy the UTM bundle
+        cp -r out/lnos-asahi-$(date +%Y.%m.%d).utm/ release/
+        
+        # Copy the distribution ZIP
+        cp out/lnos-asahi-$(date +%Y.%m.%d)-ci.zip release/
+        
+        # Create a simple README for the release
+        echo "# LnOS UTM Virtual Machine" > release/README.md
+        echo "" >> release/README.md
+        echo "Automated build for Apple Silicon Macs." >> release/README.md
+        echo "Build date: $(date)" >> release/README.md
         
     - name: Upload release assets
       if: github.event_name == 'workflow_dispatch'
